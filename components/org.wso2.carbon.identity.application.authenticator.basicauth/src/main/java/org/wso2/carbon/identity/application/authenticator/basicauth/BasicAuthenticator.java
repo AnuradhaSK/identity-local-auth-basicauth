@@ -559,7 +559,7 @@ public class BasicAuthenticator extends AbstractApplicationAuthenticator
         authProperties.put(PASSWORD_PROPERTY, password);
 
         boolean isAuthenticated = false;
-        AbstractUserStoreManager userStoreManager = getUserStoreManager(username, requestTenantDomain);
+        AbstractUserStoreManager userStoreManager = getUserStoreManager(username, requestTenantDomain); // TODO: correct tenant domain resolve
         // Reset RE_CAPTCHA_USER_DOMAIN thread local variable before the authentication
         IdentityUtil.threadLocalProperties.get().remove(RE_CAPTCHA_USER_DOMAIN);
         // Check the authentication

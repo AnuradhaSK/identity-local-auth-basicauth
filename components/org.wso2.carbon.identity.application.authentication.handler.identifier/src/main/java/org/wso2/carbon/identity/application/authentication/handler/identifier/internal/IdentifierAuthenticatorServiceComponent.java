@@ -29,7 +29,9 @@ import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.osgi.service.component.annotations.ReferencePolicy;
 import org.wso2.carbon.identity.application.authentication.framework.ApplicationAuthenticator;
 import org.wso2.carbon.identity.application.authentication.handler.identifier.IdentifierHandler;
+import org.wso2.carbon.identity.auth.service.internal.AuthenticationServiceHolder;
 import org.wso2.carbon.identity.multi.attribute.login.mgt.MultiAttributeLoginService;
+import org.wso2.carbon.identity.organization.management.service.OrganizationManager;
 import org.wso2.carbon.user.core.service.RealmService;
 
 @Component(
@@ -41,12 +43,18 @@ public class IdentifierAuthenticatorServiceComponent {
     private static final Log log = LogFactory.getLog(IdentifierAuthenticatorServiceComponent.class);
 
     private static RealmService realmService;
+    private static OrganizationManager organizationManager;
 
     private static MultiAttributeLoginService multiAttributeLogin;
 
     public static RealmService getRealmService() {
 
         return realmService;
+    }
+
+    public static OrganizationManager getOrganizationManager() {
+
+        return organizationManager;
     }
 
     public static MultiAttributeLoginService getMultiAttributeLogin() {
@@ -110,5 +118,28 @@ public class IdentifierAuthenticatorServiceComponent {
 
         IdentifierAuthenticatorServiceComponent.multiAttributeLogin = null;
 
+    }
+
+    @Reference(
+            name = "organization.service",
+            service = OrganizationManager.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetOrganizationManager"
+    )
+    protected void setOrganizationManager(OrganizationManager organizationManager) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Setting the organization management service.");
+        }
+        IdentifierAuthenticatorServiceComponent.organizationManager = organizationManager;
+    }
+
+    protected void unsetOrganizationManager(OrganizationManager organizationManager) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Unset organization management service.");
+        }
+        IdentifierAuthenticatorServiceComponent.organizationManager = null;
     }
 }

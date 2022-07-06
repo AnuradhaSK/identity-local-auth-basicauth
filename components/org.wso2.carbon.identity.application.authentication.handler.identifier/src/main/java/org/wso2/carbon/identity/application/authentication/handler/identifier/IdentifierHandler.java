@@ -47,10 +47,14 @@ import org.wso2.carbon.identity.core.model.IdentityErrorMsgContext;
 import org.wso2.carbon.identity.core.util.IdentityCoreConstants;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.multi.attribute.login.mgt.ResolvedUserResult;
+import org.wso2.carbon.identity.organization.management.service.OrganizationManager;
+import org.wso2.carbon.identity.organization.management.service.constant.OrganizationManagementConstants;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
 import org.wso2.carbon.user.api.UserRealm;
 import org.wso2.carbon.user.core.UserCoreConstants;
 import org.wso2.carbon.user.core.common.AbstractUserStoreManager;
 import org.wso2.carbon.user.core.util.UserCoreUtil;
+import org.wso2.carbon.utils.multitenancy.MultitenantConstants;
 import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
 
 import java.io.IOException;
@@ -377,7 +381,14 @@ public class IdentifierHandler extends AbstractApplicationAuthenticator
             username = FrameworkUtils.preprocessUsername(identifierFromRequest, context);
         }
 
-        String tenantAwareUsername = MultitenantUtils.getTenantAwareUsername(username);
+//        String tenantAwareUsername = MultitenantUtils.getTenantAwareUsername(username);
+        String tenantAwareUsername = null;
+        try {
+            tenantAwareUsername = getOrganizationAwareUsername(username);
+
+        } catch (OrganizationManagementException e) {
+            throw new RuntimeException(e);
+        }
         String userId = null;
         if (IdentifierAuthenticatorServiceComponent.getMultiAttributeLogin().isEnabled(context.getTenantDomain())) {
             ResolvedUserResult resolvedUserResult = IdentifierAuthenticatorServiceComponent.getMultiAttributeLogin().
@@ -393,8 +404,24 @@ public class IdentifierHandler extends AbstractApplicationAuthenticator
                         ErrorMessages.USER_DOES_NOT_EXISTS.getMessage(), User.getUserFromUserName(username));
             }
         }
+        String tenantDomain;
+        String userOrgID = null;
+        try {
+            userOrgID = getOrganizationIdFromUsername(username);
+            OrganizationManager organizationManager = IdentifierAuthenticatorServiceComponent.getOrganizationManager();
+            String rootOrgID = organizationManager.getOrganizationIdByName(
+                    OrganizationManagementConstants.ROOT);
+            if (StringUtils.equals(rootOrgID, userOrgID)) {
+                // super tenant domain will be returned.
+                tenantDomain = MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
+            } else {
+                tenantDomain = organizationManager.resolveTenantDomain(userOrgID);
+            }
+        } catch (OrganizationManagementException e) {
+            throw new RuntimeException(e);
+        }
 
-        String tenantDomain = MultitenantUtils.getTenantDomain(username);
+//        String tenantDomain = MultitenantUtils.getTenantDomain(username);
         Map<String, Object> authProperties = context.getProperties();
         if (authProperties == null) {
             authProperties = new HashMap<>();
@@ -538,5 +565,37 @@ public class IdentifierHandler extends AbstractApplicationAuthenticator
         //Identifier first is the first authenticator.
         context.getPreviousAuthenticatedIdPs().clear();
         context.addAuthenticatorParams(contextParams);
+    }
+
+    private static String getOrganizationIdFromUsername(String username) throws OrganizationManagementException {
+
+        OrganizationManager organizationManager =
+                IdentifierAuthenticatorServiceComponent.getOrganizationManager();
+        String userOrgId = organizationManager.getOrganizationIdByName(OrganizationManagementConstants.ROOT);
+        if (username.contains("@") && !MultitenantUtils.isEmailUserName()) {
+            userOrgId = username.substring(username.lastIndexOf(64) + 1);
+        } else if (MultitenantUtils.isEmailUserName() && username.indexOf("@") != username.lastIndexOf("@")) {
+            userOrgId = username.substring(username.lastIndexOf(64) + 1);
+        }
+        return userOrgId.toLowerCase();
+    }
+
+    private static String getOrganizationAwareUsername(String username) throws OrganizationManagementException {
+
+        OrganizationManager organizationManager =
+                IdentifierAuthenticatorServiceComponent.getOrganizationManager();
+        String rootOrgID = organizationManager.getOrganizationIdByName(OrganizationManagementConstants.ROOT);
+        if (username.contains("@") && !MultitenantUtils.isEmailUserName()) {
+            username = username.substring(0, username.lastIndexOf(64));
+        } else if (MultitenantUtils.isEmailUserName()) {
+            if (username.indexOf("@") == username.lastIndexOf("@")) {
+                if (rootOrgID.equalsIgnoreCase(username.substring(username.lastIndexOf(64) + 1))) {
+                    username = username.substring(0, username.lastIndexOf(64));
+                }
+            } else {
+                username = username.substring(0, username.lastIndexOf(64));
+            }
+        }
+        return username;
     }
 }
