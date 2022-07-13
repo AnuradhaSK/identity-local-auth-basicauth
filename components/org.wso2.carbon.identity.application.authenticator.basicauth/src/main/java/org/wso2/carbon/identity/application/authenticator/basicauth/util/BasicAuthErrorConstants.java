@@ -45,8 +45,10 @@ public class BasicAuthErrorConstants {
         // UserStore Error codes
         USER_DOES_NOT_EXISTS("17001", "User does not exists"),
         INVALID_CREDENTIALS("17002",
-                "User authentication failed due to invalid credentials");
+                "User authentication failed due to invalid credentials"),
 
+        // user identification failure in organization hierarchy
+        USER_NOT_IDENTIFIED_IN_HIERARCHY("17003", "User is not identified");
         private final String code;
         private final String message;
 

@@ -55,6 +55,7 @@ import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.governance.IdentityGovernanceException;
 import org.wso2.carbon.identity.multi.attribute.login.mgt.ResolvedUserResult;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
 import org.wso2.carbon.identity.recovery.RecoveryScenarios;
 import org.wso2.carbon.user.api.UserRealm;
 import org.wso2.carbon.user.core.UserCoreConstants;
@@ -563,104 +564,138 @@ public class BasicAuthenticator extends AbstractApplicationAuthenticator
         // Reset RE_CAPTCHA_USER_DOMAIN thread local variable before the authentication
         IdentityUtil.threadLocalProperties.get().remove(RE_CAPTCHA_USER_DOMAIN);
         // Check the authentication
-        AuthenticationResult authenticationResult;
-        try {
-            setUserExistThreadLocal();
+        AuthenticationResult authenticationResult = null;
 
-            if (userId != null) {
-                authenticationResult = userStoreManager.authenticateWithID(userId, password);
-            } else {
-                authenticationResult = userStoreManager.authenticateWithID(UserCoreClaimConstants.USERNAME_CLAIM_URI,
-                        tenantAwareUsername, password, UserCoreConstants.DEFAULT_PROFILE);
-            }
-            if (AuthenticationResult.AuthenticationStatus.SUCCESS == authenticationResult.getAuthenticationStatus()
-                    && authenticationResult.getAuthenticatedUser().isPresent()) {
-                isAuthenticated = true;
-            }
-            if (isAuthPolicyAccountExistCheck()) {
-                checkUserExistence();
-            }
-        } catch (UserStoreClientException e) {
-            if (log.isDebugEnabled()) {
-                log.debug("BasicAuthentication failed while trying to authenticate the user " + username, e);
-            }
-            IdentityErrorMsgContext customErrorMessageContext = new IdentityErrorMsgContext(e.getErrorCode() +
-                    ":" + e.getMessage());
-            IdentityUtil.setIdentityErrorMsg(customErrorMessageContext);
-            throw new AuthenticationFailedException(
-                    ErrorMessages.USER_STORE_EXCEPTION_WHILE_TRYING_TO_AUTHENTICATE.getCode(), e.getMessage(),
-                    User.getUserFromUserName(username), e);
-        } catch (org.wso2.carbon.user.api.UserStoreException e) {
-            if (log.isDebugEnabled()) {
-                log.debug("BasicAuthentication failed while trying to authenticate the user " + username, e);
-            }
-            // Sometimes client exceptions are wrapped in the super class.
-            // Therefore checking for possible client exception.
-            Throwable rootCause = ExceptionUtils.getRootCause(e);
-            if (rootCause instanceof UserStoreClientException) {
-                IdentityErrorMsgContext customErrorMessageContext = new IdentityErrorMsgContext(
-                        ((UserStoreClientException) rootCause).getErrorCode() + ":" + rootCause.getMessage());
-                IdentityUtil.setIdentityErrorMsg(customErrorMessageContext);
-            }
-
-            boolean showPendingUserInfo = showPendingUserInformationDefaultConfig();
+        // if Organization path accessed. can check by context.getCallerPath().
+        boolean organizationPathAccess = true;
+        if (organizationPathAccess) {
             try {
-                PrivilegedCarbonContext.startTenantFlow();
-                PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(IdentityTenantUtil.getTenantId
-                        (requestTenantDomain));
-                PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain(requestTenantDomain);
-                String tenantWiseConfig = BasicAuthenticatorDataHolder.getInstance()
-                        .getConfigurationManager().getAttribute(RESOURCE_TYPE_NAME_CONFIG, RESOURCE_NAME_CONFIG,
-                                PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG).getValue();
-                if (StringUtils.isNotBlank(tenantWiseConfig)) {
-                    showPendingUserInfo = Boolean.parseBoolean(tenantWiseConfig);
-                }
-            } catch (ConfigurationManagementException configException) {
-                if (ERROR_CODE_FEATURE_NOT_ENABLED.getCode().equals(configException.getErrorCode())) {
-                    if (log.isDebugEnabled()) {
-                        log.debug(String.format("%s Therefore using the default configuration value: %s for the " +
-                                "attribute: %s", ERROR_CODE_FEATURE_NOT_ENABLED.getMessage(), showPendingUserInfo,
-                                PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG));
-                    }
-                } else if (ERROR_CODE_ATTRIBUTE_DOES_NOT_EXISTS.getCode().equals(configException.getErrorCode())) {
-                    if (log.isDebugEnabled()) {
-                        log.debug(String.format("%s attribute doesn't exist for the tenant: %s. Therefore using the " +
-                                "default configuration value: %s for the attribute: %s",
-                                PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG, requestTenantDomain,
-                                showPendingUserInfo, PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG));
-                    }
-                } else if (ERROR_CODE_RESOURCE_TYPE_DOES_NOT_EXISTS.getCode().equals(configException.getErrorCode())) {
-                    if (log.isDebugEnabled()) {
-                        log.debug(String.format("%s resource type doesn't exist for the tenant: %s. Therefore using " +
-                                "the default configuration value: %s for the attribute: %s",
-                                RESOURCE_TYPE_NAME_CONFIG, requestTenantDomain, showPendingUserInfo,
-                                PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG));
-                    }
-                } else if (ERROR_CODE_RESOURCE_DOES_NOT_EXISTS.getCode().equals(configException.getErrorCode())) {
-                    if (log.isDebugEnabled()) {
-                        log.debug(String.format("%s resource doesn't exist for the tenant: %s. Therefore using the " +
-                                "default configuration value: %s for the attribute: %s", RESOURCE_NAME_CONFIG,
-                                requestTenantDomain, showPendingUserInfo,
-                                PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG));
-                    }
+                org.wso2.carbon.user.core.common.User user = BasicAuthenticatorDataHolder.getInstance().getOrganizationUserResidentResolverService()
+                        .resolveUserFromResidentOrgByUsernameAndAccessedOrg(tenantAwareUsername, requestTenantDomain)
+                        .orElseThrow(() -> new AuthenticationFailedException(
+                                ErrorMessages.USER_NOT_IDENTIFIED_IN_HIERARCHY.getCode()));
+                userStoreManager = getUserStoreManager(username, user.getTenantDomain());
+                if (user.getUserID() != null) {
+                    authenticationResult = userStoreManager.authenticateWithID(user.getUserID(), password);
                 } else {
-                    throw new AuthenticationFailedException(String.format("Error in retrieving %s configuration for " +
-                            "the tenant %s", PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG, requestTenantDomain, e));
+                    authenticationResult =
+                            userStoreManager.authenticateWithID(UserCoreClaimConstants.USERNAME_CLAIM_URI,
+                                    tenantAwareUsername, password, UserCoreConstants.DEFAULT_PROFILE);
                 }
-            } finally {
-                PrivilegedCarbonContext.endTenantFlow();
+                if (AuthenticationResult.AuthenticationStatus.SUCCESS ==
+                        authenticationResult.getAuthenticationStatus()) {
+                    isAuthenticated = true;
+                }
+            } catch (OrganizationManagementException | UserStoreException e) {
+                throw new RuntimeException(e);
             }
-            if (showPendingUserInfo) {
+        } else {
+            try {
+                setUserExistThreadLocal();
+
+                if (userId != null) {
+                    authenticationResult = userStoreManager.authenticateWithID(userId, password);
+                } else {
+                    authenticationResult =
+                            userStoreManager.authenticateWithID(UserCoreClaimConstants.USERNAME_CLAIM_URI,
+                                    tenantAwareUsername, password, UserCoreConstants.DEFAULT_PROFILE);
+                }
+                if (AuthenticationResult.AuthenticationStatus.SUCCESS == authenticationResult.getAuthenticationStatus()
+                        && authenticationResult.getAuthenticatedUser().isPresent()) {
+                    isAuthenticated = true;
+                }
+                if (isAuthPolicyAccountExistCheck()) {
+                    checkUserExistence();
+                }
+            } catch (UserStoreClientException e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("BasicAuthentication failed while trying to authenticate the user " + username, e);
+                }
+                IdentityErrorMsgContext customErrorMessageContext = new IdentityErrorMsgContext(e.getErrorCode() +
+                        ":" + e.getMessage());
+                IdentityUtil.setIdentityErrorMsg(customErrorMessageContext);
                 throw new AuthenticationFailedException(
                         ErrorMessages.USER_STORE_EXCEPTION_WHILE_TRYING_TO_AUTHENTICATE.getCode(), e.getMessage(),
                         User.getUserFromUserName(username), e);
-            } else {
-                throw new AuthenticationFailedException(
-                        ErrorMessages.USER_STORE_EXCEPTION_WHILE_TRYING_TO_AUTHENTICATE.getCode(), e.getMessage(),
-                        e);
+            } catch (org.wso2.carbon.user.api.UserStoreException e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("BasicAuthentication failed while trying to authenticate the user " + username, e);
+                }
+                // Sometimes client exceptions are wrapped in the super class.
+                // Therefore checking for possible client exception.
+                Throwable rootCause = ExceptionUtils.getRootCause(e);
+                if (rootCause instanceof UserStoreClientException) {
+                    IdentityErrorMsgContext customErrorMessageContext = new IdentityErrorMsgContext(
+                            ((UserStoreClientException) rootCause).getErrorCode() + ":" + rootCause.getMessage());
+                    IdentityUtil.setIdentityErrorMsg(customErrorMessageContext);
+                }
+
+                boolean showPendingUserInfo = showPendingUserInformationDefaultConfig();
+                try {
+                    PrivilegedCarbonContext.startTenantFlow();
+                    PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(IdentityTenantUtil.getTenantId
+                            (requestTenantDomain));
+                    PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain(requestTenantDomain);
+                    String tenantWiseConfig = BasicAuthenticatorDataHolder.getInstance()
+                            .getConfigurationManager().getAttribute(RESOURCE_TYPE_NAME_CONFIG, RESOURCE_NAME_CONFIG,
+                                    PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG).getValue();
+                    if (StringUtils.isNotBlank(tenantWiseConfig)) {
+                        showPendingUserInfo = Boolean.parseBoolean(tenantWiseConfig);
+                    }
+                } catch (ConfigurationManagementException configException) {
+                    if (ERROR_CODE_FEATURE_NOT_ENABLED.getCode().equals(configException.getErrorCode())) {
+                        if (log.isDebugEnabled()) {
+                            log.debug(String.format("%s Therefore using the default configuration value: %s for the " +
+                                            "attribute: %s", ERROR_CODE_FEATURE_NOT_ENABLED.getMessage(), showPendingUserInfo,
+                                    PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG));
+                        }
+                    } else if (ERROR_CODE_ATTRIBUTE_DOES_NOT_EXISTS.getCode().equals(configException.getErrorCode())) {
+                        if (log.isDebugEnabled()) {
+                            log.debug(String.format(
+                                    "%s attribute doesn't exist for the tenant: %s. Therefore using the " +
+                                            "default configuration value: %s for the attribute: %s",
+                                    PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG, requestTenantDomain,
+                                    showPendingUserInfo, PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG));
+                        }
+                    } else if (ERROR_CODE_RESOURCE_TYPE_DOES_NOT_EXISTS.getCode()
+                            .equals(configException.getErrorCode())) {
+                        if (log.isDebugEnabled()) {
+                            log.debug(String.format(
+                                    "%s resource type doesn't exist for the tenant: %s. Therefore using " +
+                                            "the default configuration value: %s for the attribute: %s",
+                                    RESOURCE_TYPE_NAME_CONFIG, requestTenantDomain, showPendingUserInfo,
+                                    PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG));
+                        }
+                    } else if (ERROR_CODE_RESOURCE_DOES_NOT_EXISTS.getCode().equals(configException.getErrorCode())) {
+                        if (log.isDebugEnabled()) {
+                            log.debug(
+                                    String.format("%s resource doesn't exist for the tenant: %s. Therefore using the " +
+                                                    "default configuration value: %s for the attribute: %s",
+                                            RESOURCE_NAME_CONFIG,
+                                            requestTenantDomain, showPendingUserInfo,
+                                            PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG));
+                        }
+                    } else {
+                        throw new AuthenticationFailedException(
+                                String.format("Error in retrieving %s configuration for " +
+                                                "the tenant %s", PENDING_USER_INFORMATION_ATTRIBUTE_NAME_CONFIG,
+                                        requestTenantDomain, e));
+                    }
+                } finally {
+                    PrivilegedCarbonContext.endTenantFlow();
+                }
+                if (showPendingUserInfo) {
+                    throw new AuthenticationFailedException(
+                            ErrorMessages.USER_STORE_EXCEPTION_WHILE_TRYING_TO_AUTHENTICATE.getCode(), e.getMessage(),
+                            User.getUserFromUserName(username), e);
+                } else {
+                    throw new AuthenticationFailedException(
+                            ErrorMessages.USER_STORE_EXCEPTION_WHILE_TRYING_TO_AUTHENTICATE.getCode(), e.getMessage(),
+                            e);
+                }
+            } finally {
+                clearUserExistThreadLocal();
             }
-        } finally {
-            clearUserExistThreadLocal();
         }
 
         if (!isAuthenticated) {
