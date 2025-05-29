@@ -93,6 +93,10 @@
             <artifactId>org.wso2.carbon.identity.auth.attribute.handler</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.wso2.carbon.identity.organization.management</groupId>
+            <artifactId>org.wso2.carbon.identity.organization.management.organization.user.sharing</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.testng</groupId>
             <artifactId>testng</artifactId>
             <scope>test</scope>
@@ -186,7 +190,11 @@
                             org.wso2.carbon.user.core.*; version="${carbon.kernel.imp.pkg.version.range}",
                             org.wso2.securevault.*; version="${org.wso2.securevault.import.version.range}",
                             org.wso2.carbon.identity.configuration.mgt.core.*; version="${carbon.identity.framework.imp.pkg.version.range}",
-                            org.wso2.carbon.context.*; version="${carbon.kernel.imp.pkg.version.range}"
+                            org.wso2.carbon.context.*; version="${carbon.kernel.imp.pkg.version.range}",
+                            org.wso2.carbon.identity.organization.management.organization.user.sharing.*;
+                            version="${org.wso2.carbon.identity.organization.management.version.range}",
+                            org.wso2.carbon.identity.organization.management.service.*;
+                            version="${org.wso2.carbon.identity.organization.management.core.version.range}",
                         </Import-Package>
                         <Export-Package>
                             !org.wso2.carbon.identity.application.authenticator.basicauth.internal,
